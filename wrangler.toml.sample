@@ -12,5 +12,7 @@ id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 [vars]
 NEWS_SOURCE_URL = "https://www.pokebeach.com/"
+RSS_ENABLED = "false"  # Set to "true" to enable the /feed endpoint
 
 # Set DISCORD_WEBHOOK_URL via: npx wrangler secret put DISCORD_WEBHOOK_URL
+# If not set, the worker runs in RSS-only mode

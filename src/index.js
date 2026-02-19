@@ -2,6 +2,8 @@ import { parse } from 'node-html-parser';
 
 const EMBED_COLOR = 0xFFCB05; // Pokemon yellow
 const KV_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
+const FEED_CACHE_KEY = 'rss:feed-cache';
+const FEED_CACHE_TTL = 30 * 60; // 30 min, matches cron interval
 const POST_DELAY_MS = 1000;
 const USER_AGENT = 'PokeBeachNewsBot/1.0 (Discord news feed; +https://github.com/kaprestridge/Poke-discord-bot)';
 
@@ -27,6 +29,13 @@ export default {
 			return Response.json(result);
 		}
 
+		if (url.pathname === '/feed' && request.method === 'GET') {
+			if (env.RSS_ENABLED === 'false') {
+				return new Response('RSS feed is disabled', { status: 404 });
+			}
+			return serveFeed(env);
+		}
+
 		return new Response('Not found', { status: 404 });
 	},
 };
@@ -43,7 +52,22 @@ async function checkForNews(env) {
 
 	const html = await response.text();
 	const articles = parseArticles(html);
-	console.log(`Parsed ${articles.length} articles from homepage`);
+	const rssEnabled = env.RSS_ENABLED === 'true';
+	const discordEnabled = !!env.DISCORD_WEBHOOK_URL;
+
+	console.log(`Parsed ${articles.length} articles from homepage (RSS: ${rssEnabled ? 'on' : 'off'}, Discord: ${discordEnabled ? 'on' : 'off'})`);
+
+	// Cache parsed articles for the RSS feed
+	if (rssEnabled) {
+		await env.POSTED_ARTICLES.put(FEED_CACHE_KEY, JSON.stringify(articles), {
+			expirationTtl: FEED_CACHE_TTL,
+		});
+	}
+
+	// Skip Discord posting if no webhook is configured
+	if (!discordEnabled) {
+		return { parsed: articles.length, new: 0, posted: 0 };
+	}
 
 	const newArticles = [];
 	for (const article of articles) {
@@ -181,7 +205,6 @@ function parseDate(dateText) {
 
 async function postToDiscord(env, article) {
 	if (!env.DISCORD_WEBHOOK_URL) {
-		console.error('DISCORD_WEBHOOK_URL not set');
 		return false;
 	}
 
@@ -220,6 +243,66 @@ async function postToDiscord(env, article) {
 
 	console.log(`Posted: ${article.title}`);
 	return true;
+}
+
+async function serveFeed(env) {
+	// Try cached articles first
+	const cached = await env.POSTED_ARTICLES.get(FEED_CACHE_KEY);
+	if (cached) {
+		const articles = JSON.parse(cached);
+		return new Response(buildRssXml(articles), {
+			headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' },
+		});
+	}
+
+	// No cache yet (worker just deployed) — fetch fresh
+	const response = await fetch(env.NEWS_SOURCE_URL, {
+		headers: { 'User-Agent': USER_AGENT },
+	});
+
+	if (!response.ok) {
+		return new Response('Failed to fetch articles', { status: 502 });
+	}
+
+	const html = await response.text();
+	const articles = parseArticles(html);
+
+	await env.POSTED_ARTICLES.put(FEED_CACHE_KEY, JSON.stringify(articles), {
+		expirationTtl: FEED_CACHE_TTL,
+	});
+
+	return new Response(buildRssXml(articles), {
+		headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' },
+	});
+}
+
+function buildRssXml(articles) {
+	const escXml = (str) => str
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+
+	const items = articles.map((a) => {
+		const pubDate = a.timestamp ? new Date(a.timestamp).toUTCString() : '';
+		return `    <item>
+      <title>${escXml(a.title)}</title>
+      <link>${escXml(a.url)}</link>
+      <guid>${escXml(a.url)}</guid>
+${pubDate ? `      <pubDate>${pubDate}</pubDate>\n` : ''}${a.author ? `      <dc:creator>${escXml(a.author)}</dc:creator>\n` : ''}${a.image ? `      <media:thumbnail url="${escXml(a.image)}" />\n` : ''}    </item>`;
+	}).join('\n');
+
+	return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>PokéBeach News</title>
+    <link>https://www.pokebeach.com/</link>
+    <description>Latest news from PokéBeach - The Largest Pokemon TCG Community</description>
+    <language>en-us</language>
+    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+${items}
+  </channel>
+</rss>`;
 }
 
 function sleep(ms) {
