@@ -26,8 +26,9 @@ Runs entirely on Cloudflare's free tier edge network — no server needed.
 3. npm install
 4. npx wrangler login
 5. npx wrangler kv namespace create POSTED_ARTICLES  →  paste ID into wrangler.toml
-6. (Optional) npx wrangler secret put DISCORD_WEBHOOK_URL
-7. npx wrangler deploy
+6. npx wrangler secret put API_KEY  →  choose any secret key for /trigger and /seed endpoints
+7. (Optional) npx wrangler secret put DISCORD_WEBHOOK_URL
+8. npx wrangler deploy
 ```
 
 Detailed steps below.
@@ -86,6 +87,18 @@ Disabled by default. To enable the `/feed` endpoint, set in `wrangler.toml`:
 RSS_ENABLED = "true"
 ```
 
+### API Key (Required for Manual Endpoints)
+
+The `/trigger` and `/seed` endpoints require an API key to prevent unauthorized access.
+
+Choose any secret key and store it:
+
+```bash
+npx wrangler secret put API_KEY
+```
+
+You'll use this key in the `X-API-Key` header when calling these endpoints.
+
 ### Discord Webhooks
 
 Optional. If not configured, the worker runs in RSS-only mode.
@@ -134,7 +147,7 @@ curl "http://localhost:8787/__scheduled?cron=*/30+*+*+*+*"
 Or use the manual trigger endpoint (returns JSON with results):
 
 ```bash
-curl -X POST http://localhost:8787/trigger
+curl -X POST -H "X-API-Key: your-api-key" http://localhost:8787/trigger
 ```
 
 ## Step 6: Deploy
@@ -176,7 +189,7 @@ npx wrangler tail
 If you have Discord webhooks configured, the next cron run will post all articles currently on the PokéBeach homepage (~17) to Discord. To avoid this initial flood, hit the seed endpoint right after deploying:
 
 ```bash
-curl -X POST https://YOUR_WORKER.YOUR_SUBDOMAIN.workers.dev/seed
+curl -X POST -H "X-API-Key: your-api-key" https://YOUR_WORKER.YOUR_SUBDOMAIN.workers.dev/seed
 ```
 
 This marks all current articles as "already posted" in KV without sending anything to Discord. Only genuinely new articles will trigger webhooks after that.

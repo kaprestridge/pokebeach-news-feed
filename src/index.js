@@ -20,11 +20,17 @@ export default {
 		}
 
 		if (url.pathname === '/trigger' && request.method === 'POST') {
+			if (!isAuthorized(request, env)) {
+				return new Response('Unauthorized', { status: 401 });
+			}
 			const result = await checkForNews(env);
 			return Response.json(result);
 		}
 
 		if (url.pathname === '/seed' && request.method === 'POST') {
+			if (!isAuthorized(request, env)) {
+				return new Response('Unauthorized', { status: 401 });
+			}
 			const result = await seedExistingArticles(env);
 			return Response.json(result);
 		}
@@ -307,4 +313,9 @@ ${items}
 
 function sleep(ms) {
 	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isAuthorized(request, env) {
+	const apiKey = request.headers.get('X-API-Key');
+	return env.API_KEY && apiKey === env.API_KEY;
 }
