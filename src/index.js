@@ -15,11 +15,17 @@ export default {
 	async fetch(request, env) {
 		const url = new URL(request.url);
 
-		if (url.pathname === '/' && request.method === 'GET') {
+		if (url.pathname === '/') {
+			if (request.method !== 'GET') {
+				return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET' } });
+			}
 			return new Response('PokéBeach News Worker is running.', { status: 200 });
 		}
 
-		if (url.pathname === '/trigger' && request.method === 'POST') {
+		if (url.pathname === '/trigger') {
+			if (request.method !== 'POST') {
+				return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });
+			}
 			if (!isAuthorized(request, env)) {
 				return new Response('Unauthorized', { status: 401 });
 			}
@@ -27,7 +33,10 @@ export default {
 			return Response.json(result);
 		}
 
-		if (url.pathname === '/seed' && request.method === 'POST') {
+		if (url.pathname === '/seed') {
+			if (request.method !== 'POST') {
+				return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'POST' } });
+			}
 			if (!isAuthorized(request, env)) {
 				return new Response('Unauthorized', { status: 401 });
 			}
@@ -35,7 +44,10 @@ export default {
 			return Response.json(result);
 		}
 
-		if (url.pathname === '/feed' && request.method === 'GET') {
+		if (url.pathname === '/feed') {
+			if (request.method !== 'GET') {
+				return new Response('Method Not Allowed', { status: 405, headers: { Allow: 'GET' } });
+			}
 			if (env.RSS_ENABLED !== 'true') {
 				return new Response('RSS feed is disabled', { status: 404 });
 			}
