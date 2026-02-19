@@ -273,6 +273,7 @@ async function serveFeed(env) {
 				headers: {
 				'Content-Type': 'application/rss+xml; charset=utf-8',
 				'Cache-Control': 'public, max-age=1800',
+				'Access-Control-Allow-Origin': '*',
 			},
 			});
 		} catch (err) {
@@ -300,6 +301,7 @@ async function serveFeed(env) {
 		headers: {
 				'Content-Type': 'application/rss+xml; charset=utf-8',
 				'Cache-Control': 'public, max-age=1800',
+				'Access-Control-Allow-Origin': '*',
 			},
 	});
 }
