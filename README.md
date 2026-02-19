@@ -35,10 +35,11 @@ Detailed steps below.
 ```bash
 cd pokebeach-news-worker
 cp wrangler.toml.sample wrangler.toml
+cp .dev.vars.sample .dev.vars
 npm install
 ```
 
-`wrangler.toml` is gitignored since it contains your deployer-specific KV namespace ID. The sample file is tracked as a template.
+Both `wrangler.toml` and `.dev.vars` are gitignored since they contain deployer-specific config and secrets. The `.sample` files are tracked as templates.
 
 ## Step 2: Log In to Cloudflare
 
