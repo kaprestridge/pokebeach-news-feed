@@ -258,7 +258,10 @@ async function serveFeed(env) {
 		try {
 			const articles = JSON.parse(cached);
 			return new Response(buildRssXml(articles), {
-				headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' },
+				headers: {
+				'Content-Type': 'application/rss+xml; charset=utf-8',
+				'Cache-Control': 'public, max-age=1800',
+			},
 			});
 		} catch (err) {
 			console.error('Failed to parse cached feed, fetching fresh:', err.message);
@@ -282,7 +285,10 @@ async function serveFeed(env) {
 	});
 
 	return new Response(buildRssXml(articles), {
-		headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' },
+		headers: {
+				'Content-Type': 'application/rss+xml; charset=utf-8',
+				'Cache-Control': 'public, max-age=1800',
+			},
 	});
 }
 
