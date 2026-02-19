@@ -255,13 +255,17 @@ async function serveFeed(env) {
 	// Try cached articles first
 	const cached = await env.POSTED_ARTICLES.get(FEED_CACHE_KEY);
 	if (cached) {
-		const articles = JSON.parse(cached);
-		return new Response(buildRssXml(articles), {
-			headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' },
-		});
+		try {
+			const articles = JSON.parse(cached);
+			return new Response(buildRssXml(articles), {
+				headers: { 'Content-Type': 'application/rss+xml; charset=utf-8' },
+			});
+		} catch (err) {
+			console.error('Failed to parse cached feed, fetching fresh:', err.message);
+		}
 	}
 
-	// No cache yet (worker just deployed) — fetch fresh
+	// No cache or parse failed — fetch fresh
 	const response = await fetch(env.NEWS_SOURCE_URL, {
 		headers: { 'User-Agent': USER_AGENT },
 	});
