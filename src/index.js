@@ -30,7 +30,7 @@ export default {
 		}
 
 		if (url.pathname === '/feed' && request.method === 'GET') {
-			if (env.RSS_ENABLED === 'false') {
+			if (env.RSS_ENABLED !== 'true') {
 				return new Response('RSS feed is disabled', { status: 404 });
 			}
 			return serveFeed(env);
