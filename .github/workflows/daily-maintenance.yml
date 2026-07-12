@@ -25,31 +25,17 @@ jobs:
       FEED_URL: https://kaprestridge.github.io/pokebeach-news-feed/feed.xml
       MAX_AGE_HOURS: '6' # feed rebuilds every 30 min; >6h stale means something is wrong
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Check published feed
         run: |
           echo "Checking $FEED_URL"
-
-          # Reachable (curl -f fails the step on any non-2xx)
+          # Reachable (curl -f fails the step on any non-2xx).
           curl -fsS "$FEED_URL" -o feed-live.xml
-
-          # Well-formed XML
-          xmllint --noout feed-live.xml
-
-          # Has at least one article
-          items=$(grep -c '<item>' feed-live.xml || true)
-          echo "Items: $items"
-          test "$items" -ge 1
-
-          # Not stale — lastBuildDate within MAX_AGE_HOURS
-          build_date=$(xmllint --xpath 'string(/rss/channel/lastBuildDate)' feed-live.xml)
-          echo "lastBuildDate: $build_date"
-          build_ts=$(date -u -d "$build_date" +%s)
-          now_ts=$(date -u +%s)
-          age_hours=$(( (now_ts - build_ts) / 3600 ))
-          echo "Feed age: ${age_hours}h (max ${MAX_AGE_HOURS}h)"
-          test "$age_hours" -le "$MAX_AGE_HOURS"
-
-          echo "Feed is healthy."
+          # Validate item count and staleness with Node (no extra deps).
+          node scripts/check-feed.mjs feed-live.xml
 
   keepalive:
     runs-on: ubuntu-latest
