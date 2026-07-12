@@ -8,7 +8,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "test": "vitest"
+    "test": "vitest",
+    "build:feed": "node scripts/build-feed.js"
   },
   "dependencies": {
     "node-html-parser": "^6.1.13"
