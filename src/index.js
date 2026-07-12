@@ -343,3 +343,6 @@ function isAuthorized(request, env) {
 	const apiKey = request.headers.get('X-API-Key');
 	return env.API_KEY && apiKey === env.API_KEY;
 }
+
+// Export functions for testing
+export { parseArticles, extractArticle, parseDate, buildRssXml, isAuthorized };
