@@ -1,0 +1,78 @@
+name: Daily Health Check & Keepalive
+
+# Runs once a day and does two things:
+#   1. health check — probe the live published feed and fail (emailing us) if
+#      it is unreachable, malformed, empty, or stale (i.e. the publish cron
+#      silently stopped).
+#   2. keepalive — GitHub auto-disables scheduled workflows after 60 days of
+#      no repo activity. When the repo has been idle ~50 days, push a tiny
+#      empty commit to reset that timer for all scheduled workflows. It only
+#      commits when actually needed, so there is no daily history noise.
+
+on:
+  schedule:
+    - cron: '0 8 * * *' # daily at 08:00 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      FEED_URL: https://kaprestridge.github.io/pokebeach-news-feed/feed.xml
+      MAX_AGE_HOURS: '6' # feed rebuilds every 30 min; >6h stale means something is wrong
+    steps:
+      - name: Check published feed
+        run: |
+          echo "Checking $FEED_URL"
+
+          # Reachable (curl -f fails the step on any non-2xx)
+          curl -fsS "$FEED_URL" -o feed-live.xml
+
+          # Well-formed XML
+          xmllint --noout feed-live.xml
+
+          # Has at least one article
+          items=$(grep -c '<item>' feed-live.xml || true)
+          echo "Items: $items"
+          test "$items" -ge 1
+
+          # Not stale — lastBuildDate within MAX_AGE_HOURS
+          build_date=$(xmllint --xpath 'string(/rss/channel/lastBuildDate)' feed-live.xml)
+          echo "lastBuildDate: $build_date"
+          build_ts=$(date -u -d "$build_date" +%s)
+          now_ts=$(date -u +%s)
+          age_hours=$(( (now_ts - build_ts) / 3600 ))
+          echo "Feed age: ${age_hours}h (max ${MAX_AGE_HOURS}h)"
+          test "$age_hours" -le "$MAX_AGE_HOURS"
+
+          echo "Feed is healthy."
+
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      MAX_IDLE_DAYS: '50' # commit before GitHub's 60-day auto-disable kicks in
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep scheduled workflows alive
+        run: |
+          last_commit_ts=$(git log -1 --format=%ct)
+          now_ts=$(date -u +%s)
+          idle_days=$(( (now_ts - last_commit_ts) / 86400 ))
+          echo "Repo idle for ${idle_days} day(s) (threshold ${MAX_IDLE_DAYS})"
+
+          if [ "$idle_days" -lt "$MAX_IDLE_DAYS" ]; then
+            echo "Recent activity — no keepalive commit needed."
+            exit 0
+          fi
+
+          echo "Approaching the 60-day auto-disable window — pushing a keepalive commit."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "chore: keepalive to prevent scheduled workflow auto-disable"
+          git push
