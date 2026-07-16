@@ -43,6 +43,10 @@ jobs:
         run: npm ci
 
       - name: Build feed
+        # The source feed URL is kept in a repo secret (not in the code) so it
+        # is masked in this public repo's logs. Forks must set their own.
+        env:
+          FEED_SOURCE_URL: ${{ secrets.FEED_SOURCE_URL }}
         run: npm run build:feed
 
       - name: Configure Pages
