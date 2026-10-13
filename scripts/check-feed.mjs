@@ -1,39 +1,54 @@
 // Health check for the published RSS feed.
 //
-// Validates that the feed has at least one article and was built recently,
-// then exits non-zero (failing CI, which emails us) on any problem. Uses the
-// same string-matching approach as the RSS tests — no XML dependency needed.
+// The Pages feed is rebuilt only when the Worker sees new articles, so its age
+// says nothing about health. This compares the published feed with the
+// Worker's /feed and fails (emailing us) when Pages is missing articles or
+// carries ones the source has dropped. A mismatch is rechecked once after a
+// delay so an in-flight publish or the Pages CDN cache does not cause a false
+// alarm.
 //
-// Usage: MAX_AGE_HOURS=6 node scripts/check-feed.mjs feed-live.xml
+// Usage: FEED_URL=<pages feed> FEED_SOURCE_URL=<worker feed> node scripts/check-feed.mjs
 
-import { readFileSync } from 'node:fs';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { parseItems, compareFeeds } from './feed-items.mjs';
 
-const MAX_AGE_HOURS = Number(process.env.MAX_AGE_HOURS ?? 6);
-const path = process.argv[2] ?? 'feed-live.xml';
+const { FEED_URL, FEED_SOURCE_URL } = process.env;
+const RECHECK_DELAY_SECONDS = Number(process.env.RECHECK_DELAY_SECONDS ?? 900);
 
 function fail(message) {
 	console.error(message);
 	process.exit(1);
 }
 
-const xml = readFileSync(path, 'utf8');
+// Labels keep the source URL (a secret) out of error messages.
+async function fetchItems(url, label) {
+	const response = await fetch(url, { cache: 'no-store' });
+	if (!response.ok) fail(`${label} returned ${response.status} ${response.statusText}`);
+	return parseItems(await response.text());
+}
 
-const items = (xml.match(/<item>/g) || []).length;
-console.log(`Items: ${items}`);
-if (items < 1) fail('Feed has no <item> entries');
+async function check() {
+	const published = await fetchItems(`${FEED_URL}?t=${Date.now()}`, 'Published feed');
+	const source = await fetchItems(FEED_SOURCE_URL, 'Source feed');
+	console.log(`Published items: ${published.length}, source items: ${source.length}`);
+	if (published.length < 1) fail('Published feed has no <item> entries');
+	if (source.length < 1) fail('Source feed has no <item> entries — the Worker may be failing to scrape PokéBeach');
+	return compareFeeds(source, published);
+}
 
-const match = xml.match(/<lastBuildDate>(.*?)<\/lastBuildDate>/);
-if (!match) fail('Feed has no <lastBuildDate>');
-const buildDate = match[1];
-console.log(`lastBuildDate: ${buildDate}`);
+if (!FEED_URL || !FEED_SOURCE_URL) fail('FEED_URL and FEED_SOURCE_URL must both be set');
 
-const built = new Date(buildDate);
-if (Number.isNaN(built.getTime())) fail(`Unparseable lastBuildDate: ${buildDate}`);
+let result = await check();
+if (!result.inSync) {
+	console.log(`Feeds differ (${result.missing.length} missing, ${result.extra.length} extra); rechecking in ${RECHECK_DELAY_SECONDS}s`);
+	await sleep(RECHECK_DELAY_SECONDS * 1000);
+	result = await check();
+}
 
-const ageHours = (Date.now() - built.getTime()) / 3_600_000;
-console.log(`Feed age: ${ageHours.toFixed(1)}h (max ${MAX_AGE_HOURS}h)`);
-if (ageHours > MAX_AGE_HOURS) {
-	fail(`Feed is stale (older than ${MAX_AGE_HOURS}h) — the publish cron may have stopped`);
+if (!result.inSync) {
+	for (const url of result.missing) console.error(`Missing from Pages: ${url}`);
+	for (const url of result.extra) console.error(`On Pages but dropped from source: ${url}`);
+	fail('Published feed is behind the source — the Worker dispatch or publish workflow may be failing');
 }
 
 console.log('Feed is healthy.');

@@ -122,6 +122,20 @@ Paste the webhook URL when prompted. This is stored securely and never appears i
 
 If you skip this step, the worker runs in RSS-only mode — no Discord posts, no errors.
 
+### GitHub Pages Publish Trigger
+
+Optional, and only relevant with RSS enabled. When the article list changes, the worker starts the repo's **Publish RSS Feed** workflow via GitHub's `repository_dispatch` API, so the Pages feed updates within about 30 minutes of each new post. GitHub's own scheduler runs that workflow hours late, so it is kept as a 6-hourly backstop.
+
+1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) scoped to this repository only, with the **Contents: Read and write** permission (required by `repository_dispatch`)
+2. Set `GITHUB_REPO` in `wrangler.toml` to the repository, e.g. `owner/repo`
+3. Store the token:
+
+```bash
+npx wrangler secret put GITHUB_TOKEN
+```
+
+The worker records the last dispatched article list in KV only after GitHub accepts the dispatch, so a failed dispatch is retried on the next cron run. Without `GITHUB_TOKEN` or `GITHUB_REPO` set, dispatching is skipped.
+
 ## Step 5: Test Locally (Optional)
 
 Secrets set via `wrangler secret` only exist in Cloudflare's production environment — `wrangler dev` can't access them. For local testing, edit `.dev.vars` and paste your Discord webhook URL (or leave it blank for RSS-only). This file is gitignored.

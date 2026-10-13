@@ -4,6 +4,7 @@ const EMBED_COLOR = 0xFFCB05; // Pokemon yellow
 const KV_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
 const FEED_CACHE_KEY = 'rss:feed-cache';
 const FEED_CACHE_TTL = 30 * 60; // 30 min, matches cron interval
+const LAST_DISPATCHED_KEY = 'publish:last-dispatched';
 const POST_DELAY_MS = 1000;
 const USER_AGENT = 'PokeBeachNewsBot/1.0 (Discord news feed; +https://github.com/kaprestridge/Poke-discord-bot)';
 
@@ -80,6 +81,9 @@ async function checkForNews(env) {
 		await env.POSTED_ARTICLES.put(FEED_CACHE_KEY, JSON.stringify(articles), {
 			expirationTtl: FEED_CACHE_TTL,
 		});
+
+		const publish = await notifyPublisher(env, articles);
+		console.log(`Publish dispatch: ${publish.dispatched ? 'sent' : `skipped (${publish.reason})`}`);
 	}
 
 	// Skip Discord posting if no webhook is configured
@@ -121,6 +125,50 @@ async function checkForNews(env) {
 
 	console.log(`Posted ${posted} new articles to Discord`);
 	return { parsed: articles.length, new: newArticles.length, posted };
+}
+
+// GitHub's scheduler runs the Pages publish workflow hours late, so the Worker
+// (whose Cloudflare cron fires on time) starts it via repository_dispatch
+// whenever the article list changes. The list is recorded only after GitHub
+// accepts the dispatch, so a failed dispatch is retried on the next cron run.
+async function notifyPublisher(env, articles) {
+	if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) {
+		return { dispatched: false, reason: 'not-configured' };
+	}
+	if (articles.length === 0) {
+		return { dispatched: false, reason: 'no-articles' };
+	}
+
+	const urls = articles.map((a) => a.url);
+	const signature = urls.join('\n');
+	if (await env.POSTED_ARTICLES.get(LAST_DISPATCHED_KEY) === signature) {
+		return { dispatched: false, reason: 'unchanged' };
+	}
+
+	let response;
+	try {
+		response = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/dispatches`, {
+			method: 'POST',
+			headers: {
+				Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+				Accept: 'application/vnd.github+json',
+				'X-GitHub-Api-Version': '2022-11-28',
+				'User-Agent': USER_AGENT,
+			},
+			body: JSON.stringify({ event_type: 'feed-updated', client_payload: { urls } }),
+		});
+	} catch (err) {
+		console.error(`GitHub dispatch failed: ${err.message}`);
+		return { dispatched: false, reason: err.message };
+	}
+
+	if (!response.ok) {
+		console.error(`GitHub dispatch failed (${response.status}): ${await response.text()}`);
+		return { dispatched: false, reason: `github-${response.status}` };
+	}
+
+	await env.POSTED_ARTICLES.put(LAST_DISPATCHED_KEY, signature);
+	return { dispatched: true };
 }
 
 async function seedExistingArticles(env) {
@@ -345,4 +393,4 @@ function isAuthorized(request, env) {
 }
 
 // Export functions for testing
-export { parseArticles, extractArticle, parseDate, buildRssXml, isAuthorized };
+export { parseArticles, extractArticle, parseDate, buildRssXml, isAuthorized, notifyPublisher };

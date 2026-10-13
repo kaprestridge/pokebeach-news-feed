@@ -1,9 +1,9 @@
 name: Daily Health Check & Keepalive
 
 # Runs once a day and does two things:
-#   1. health check — probe the live published feed and fail (emailing us) if
-#      it is unreachable, malformed, empty, or stale (i.e. the publish cron
-#      silently stopped).
+#   1. health check — compare the live published feed with the Worker's feed
+#      and fail (emailing us) if Pages is unreachable, empty, or behind the
+#      source (i.e. the Worker dispatch or publish workflow stopped working).
 #   2. keepalive — GitHub auto-disables scheduled workflows after 60 days of
 #      no repo activity. When the repo has been idle ~50 days, push a tiny
 #      empty commit to reset that timer for all scheduled workflows. It only
@@ -23,19 +23,14 @@ jobs:
       contents: read
     env:
       FEED_URL: https://kaprestridge.github.io/pokebeach-news-feed/feed.xml
-      MAX_AGE_HOURS: '6' # feed rebuilds every 30 min; >6h stale means something is wrong
+      FEED_SOURCE_URL: ${{ secrets.FEED_SOURCE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Check published feed
-        run: |
-          echo "Checking $FEED_URL"
-          # Reachable (curl -f fails the step on any non-2xx).
-          curl -fsS "$FEED_URL" -o feed-live.xml
-          # Validate item count and staleness with Node (no extra deps).
-          node scripts/check-feed.mjs feed-live.xml
+        run: node scripts/check-feed.mjs
 
   keepalive:
     runs-on: ubuntu-latest
