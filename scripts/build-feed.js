@@ -9,9 +9,17 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { parseItems, compareFeeds } from './feed-items.mjs';
 
 const FEED_SOURCE_URL = process.env.FEED_SOURCE_URL;
 const OUTPUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
+// Article URLs the Worker saw when it dispatched this run (JSON array; absent
+// on scheduled/manual runs). Worker KV is eventually consistent, so /feed can
+// briefly serve the previous list; we wait for it to match before publishing.
+const EXPECTED_URLS = JSON.parse(process.env.EXPECTED_URLS || 'null');
+const MATCH_ATTEMPTS = 6;
+const MATCH_DELAY_MS = 20_000;
 
 async function main() {
 	if (!FEED_SOURCE_URL) {
@@ -21,14 +29,7 @@ async function main() {
 		);
 	}
 
-	const response = await fetch(FEED_SOURCE_URL);
-
-	if (!response.ok) {
-		throw new Error(`Failed to fetch source feed: ${response.status} ${response.statusText}`);
-	}
-
-	const xml = await response.text();
-	const items = parseItems(xml);
+	const { xml, items } = await fetchSourceFeed();
 
 	// Guard against publishing an empty feed (e.g. the Worker returned an error
 	// page) — failing the job preserves the last good deploy.
@@ -43,13 +44,28 @@ async function main() {
 	console.log(`Published feed with ${items.length} items`);
 }
 
-function parseItems(xml) {
-	return [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => {
-		const block = m[1];
-		const title = (block.match(/<title>([\s\S]*?)<\/title>/) || [])[1] ?? '';
-		const url = (block.match(/<link>([\s\S]*?)<\/link>/) || [])[1] ?? '';
-		return { title, url };
-	});
+async function fetchSourceFeed() {
+	for (let attempt = 1; ; attempt++) {
+		const response = await fetch(FEED_SOURCE_URL);
+		if (!response.ok) {
+			throw new Error(`Failed to fetch source feed: ${response.status} ${response.statusText}`);
+		}
+		const xml = await response.text();
+		const items = parseItems(xml);
+
+		if (!Array.isArray(EXPECTED_URLS)) return { xml, items };
+		// Feed links are XML-escaped by the Worker; escape the raw URLs to match.
+		const expected = EXPECTED_URLS.map((url) => ({
+			url: url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+		}));
+		if (compareFeeds(expected, items).inSync) return { xml, items };
+
+		if (attempt === MATCH_ATTEMPTS) {
+			throw new Error('Source feed never matched the dispatched article list — refusing to publish an outdated feed');
+		}
+		console.log(`Source feed does not match the dispatched article list yet (attempt ${attempt}/${MATCH_ATTEMPTS}), retrying`);
+		await sleep(MATCH_DELAY_MS);
+	}
 }
 
 function landingPage(items) {
@@ -75,7 +91,7 @@ function landingPage(items) {
 </head>
 <body>
   <h1>PokéBeach News</h1>
-  <p>An unofficial RSS feed of the latest <a href="https://www.pokebeach.com/">PokéBeach</a> news, rebuilt every 30 minutes.</p>
+  <p>An unofficial RSS feed of the latest <a href="https://www.pokebeach.com/">PokéBeach</a> news, updated within about 30 minutes of each new post.</p>
   <p>Subscribe in your reader with: <code>feed.xml</code></p>
   <p><a href="feed.xml">→ feed.xml</a></p>
   <h2>Latest headlines</h2>

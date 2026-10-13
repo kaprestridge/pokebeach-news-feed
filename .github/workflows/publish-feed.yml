@@ -1,10 +1,12 @@
 name: Publish RSS Feed
 
 on:
+  # The Worker dispatches this as soon as its 30-minute Cloudflare cron sees
+  # new articles. GitHub's scheduler runs hours late, so it is only a backstop.
+  repository_dispatch:
+    types: [feed-updated]
   schedule:
-    # Every 30 minutes. Note: GitHub runs scheduled workflows best-effort and
-    # may delay or skip ticks under load.
-    - cron: '*/30 * * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -47,6 +49,8 @@ jobs:
         # is masked in this public repo's logs. Forks must set their own.
         env:
           FEED_SOURCE_URL: ${{ secrets.FEED_SOURCE_URL }}
+          # Articles the Worker saw when dispatching; empty on other triggers.
+          EXPECTED_URLS: ${{ github.event_name == 'repository_dispatch' && toJSON(github.event.client_payload.urls) || '' }}
         run: npm run build:feed
 
       - name: Configure Pages
